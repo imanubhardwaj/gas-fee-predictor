@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { config } from './config';
 import type { Asset, ChainId } from './chains';
 
@@ -105,11 +105,21 @@ type Row = Record<string, unknown>;
 const num = (v: unknown) => Number(v);
 const nullableNum = (v: unknown) => (v == null ? null : Number(v));
 
+/** Serverless: the deployed bundle is read-only, so copy the committed snapshot into the writable DB path once per cold start. */
+function seedFromSnapshot(path: string) {
+  if (!config.serverless || existsSync(path)) return;
+  const seed = join(process.cwd(), 'snapshot', 'gas.sqlite');
+  if (existsSync(seed)) copyFileSync(seed, path);
+}
+
 export class Store {
   readonly db: DatabaseSync;
 
   constructor(path: string = config.dbPath) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+    if (path !== ':memory:') {
+      mkdirSync(dirname(path), { recursive: true });
+      seedFromSnapshot(path);
+    }
     this.db = new DatabaseSync(path);
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec('PRAGMA synchronous=NORMAL');
